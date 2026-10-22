@@ -367,7 +367,7 @@ mongoose.connect(process.env.MONGO_URI, {
     }, 100);
 
     const PORT = process.env.PORT;
-    const server = app.listen(PORT, '127.0.0.1', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`\n🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔒 HTTPS: ${process.env.NODE_ENV === 'production' ? 'Enforced' : 'Disabled (dev)'}`);
