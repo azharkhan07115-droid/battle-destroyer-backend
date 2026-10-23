@@ -344,78 +344,50 @@ setInterval(async () => {
   }
 }, 60000); // Only ONE interval, not two
 
-// ===== MONGODB CONNECTION & SERVER START =====
-mongoose.connect(process.env.MONGO_URI, {
-  serverSelectionTimeoutMS: 30000,
-  connectTimeoutMS: 30000,
-})
-  .then(async () => {
-    console.log('✅ MongoDB connected successfully');
+// ===== SERVER START (before MongoDB so Render health check passes) =====
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 Server running on port ${PORT}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔒 HTTPS: ${process.env.NODE_ENV === 'production' ? 'Enforced' : 'Disabled (dev)'}`);
+  console.log(`🛡️  CSRF Protection: Enabled (except API routes)`);
+  console.log(`📦 Max Request Size: 10KB`);
+  console.log(`\n✨ Server listening — MongoDB connecting in background...`);
+});
 
-    await bgmiService.initialize();
-
-    console.log('\n🔄 Initializing Daily Reset Service...');
-    dailyResetService.start();
-
-    setTimeout(() => {
-      const status = dailyResetService.getStatus();
-      console.log('✅ Daily reset service initialized');
-      console.log(`\n🔄 Daily Reset Service Configuration:`);
-      console.log(`   ├─ Schedule: ${status.schedule}`);
-      console.log(`   ├─ Timezone: ${status.timezone}`);
-      console.log(`   ├─ Status: ${status.isRunning ? '🟢 Running' : '🔴 Stopped'}`);
-      console.log(`   └─ Next Run: ${status.nextRun}`);
-    }, 100);
-
-    const PORT = process.env.PORT;
-    const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`\n🚀 Server running on port ${PORT}`);
-      console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔒 HTTPS: ${process.env.NODE_ENV === 'production' ? 'Enforced' : 'Disabled (dev)'}`);
-      console.log(`🛡️  CSRF Protection: Enabled (except API routes)`);
-      console.log(`📦 Max Request Size: 10KB`);
-      console.log(`🔗 BGMI APIs: ${bgmiService.getApiCount()} endpoints configured`);
-      console.log(`\n📊 Rate Limiting Configuration:`);
-      console.log(`   ├─ Global API: 100 req/15min (production)`);
-      console.log(`   ├─ Attack Endpoint: 5 req/1min (STRICT)`);
-      console.log(`   ├─ Admin Endpoints: 200 req/15min`);
-      console.log(`   ├─ Reseller Endpoints: 60 req/15min`);
-      console.log(`   ├─ External API: 100 req/min (per user)`);
-      console.log(`   └─ Health Checks: ✅ Unlimited (no rate limit)`);
-      console.log(`\n🔑 API Endpoints Available:`);
-      console.log(`   ├─ External API: /api/v1/attack, /api/v1/stats, /api/v1/health`);
-      console.log(`   ├─ Admin API: /api/admin/api-users (CRUD operations)`);
-      console.log(`   ├─ Auth: /api/auth/login, /api/auth/register`);
-      console.log(`   └─ Panel: /api/panel/*`);
-      console.log(`\n✨ Server ready!`);
-    });
-
-    // Graceful shutdown
-    process.on('SIGTERM', async () => {
-      console.log('\n🛑 SIGTERM received, shutting down gracefully...');
-
-      dailyResetService.stop();
-      console.log('✅ Daily reset service stopped');
-
-      try {
-        await bgmiService.cleanup();
-        console.log('✅ BGMI cleanup completed');
-      } catch (error) {
-        console.error('❌ BGMI cleanup failed:', error);
-      }
-
-      server.close(() => {
-        console.log('✅ Server closed');
-        mongoose.connection.close(false, () => {
-          console.log('✅ MongoDB connection closed');
-          process.exit(0);
-        });
-      });
-    });
-  })
-  .catch(err => {
-    console.error('❌ MongoDB Connection Error:', err.message);
-    process.exit(1);
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 SIGTERM received, shutting down gracefully...');
+  dailyResetService.stop();
+  try { await bgmiService.cleanup(); } catch (e) { console.error('❌ BGMI cleanup failed:', e); }
+  server.close(() => {
+    mongoose.connection.close(false, () => { process.exit(0); });
   });
+});
+
+// ===== MONGODB CONNECTION (background, with retry) =====
+async function connectWithRetry(attempt = 1) {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 30000,
+      connectTimeoutMS: 30000,
+    });
+    console.log('✅ MongoDB connected successfully');
+    await bgmiService.initialize();
+    console.log(`🔗 BGMI APIs: ${bgmiService.getApiCount()} endpoints configured`);
+    dailyResetService.start();
+    console.log('✅ Daily reset service started');
+  } catch (err) {
+    console.error(`❌ MongoDB connection attempt ${attempt} failed: ${err.message}`);
+    if (attempt < 5) {
+      const delay = attempt * 5000;
+      console.log(`🔄 Retrying in ${delay / 1000}s...`);
+      setTimeout(() => connectWithRetry(attempt + 1), delay);
+    } else {
+      console.error('❌ MongoDB failed after 5 attempts — DB-dependent routes will return 503');
+    }
+  }
+}
+connectWithRetry();
 
 module.exports = app;
