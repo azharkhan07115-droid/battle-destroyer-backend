@@ -346,7 +346,8 @@ setInterval(async () => {
 
 // ===== MONGODB CONNECTION & SERVER START =====
 mongoose.connect(process.env.MONGO_URI, {
-  serverSelectionTimeoutMS: 5000,
+  serverSelectionTimeoutMS: 30000,
+  connectTimeoutMS: 30000,
 })
   .then(async () => {
     console.log('✅ MongoDB connected successfully');
