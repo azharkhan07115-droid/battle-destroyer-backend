@@ -67,7 +67,16 @@ async function makeHttpRequest(url, data, headers, timeout = 15000) {
     });
 }
 
-// Apply authentication middleware
+// Health check (PUBLIC - no auth needed)
+router.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0'
+    });
+});
+
+// Apply authentication middleware (all routes below require API key)
 router.use(authenticateApiUser);
 
 // Attack endpoint
@@ -376,13 +385,5 @@ router.get('/stats', async (req, res) => {
     }
 });
 
-// Health check
-router.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        version: '1.0.0'
-    });
-});
 
 module.exports = router;
